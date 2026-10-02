@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Vaultify",
+    "slug": "react-native-assets-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/vaultify-icon.jpg",
+    "userInterfaceStyle": "dark",
+    "scheme": "react-native-assets-app",
+    "splash": {
+      "image": "./assets/vaultify-icon.jpg",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f0c29"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.assetsmanagement.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/vaultify-icon.jpg",
+        "backgroundColor": "#0f0c29"
+      },
+      "package": "com.assetsmanagement.app"
+    },
+    "web": {
+      "favicon": "./assets/vaultify-icon.jpg",
+      "bundler": "metro"
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "45b5b14c-c5a1-448d-9e39-77c1e691f6ea"
+      }
+    },
+    "owner": "tauqeerahmed"
+  }
+}
