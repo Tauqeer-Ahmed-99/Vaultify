@@ -11,6 +11,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  PanResponder,
+  ColorValue,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
@@ -68,6 +70,19 @@ export default function Home() {
     showCancel?: boolean;
     isActionLoading?: boolean;
   }>({ visible: false, title: '', message: '' });
+
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return gestureState.dy > 15 && Math.abs(gestureState.dx) < 20;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 50) {
+          setModalVisible(false);
+        }
+      },
+    })
+  ).current;
 
   const openModal = (acc?: Account) => {
     if (acc) {
@@ -182,7 +197,7 @@ export default function Home() {
     return result;
   }, [accounts, searchQuery]);
 
-  const getCardColors = (item: Account) => {
+  const getCardColors = (item: Account): ColorValue[] => {
     const cardColors = [
       ['#a78bfa', '#7c3aed'],
       ['#38bdf8', '#0284c7'],
@@ -220,7 +235,7 @@ export default function Home() {
         onLongPress={() => toggle(item.id)}
       >
         <LinearGradient
-          colors={isSelected ? ['#ef4444', '#dc2626'] : colors}
+          colors={isSelected ? ['#ef4444', '#dc2626'] : colors as [ColorValue, ColorValue]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[styles.card, isSelected && styles.cardSelected]}
@@ -382,10 +397,10 @@ export default function Home() {
       <Modal visible={modalVisible} transparent animationType="slide">
         <Pressable style={styles.backdrop} onPress={() => setModalVisible(false)} />
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
           style={styles.modalWrap}
         >
-          <View style={styles.modalSheet}>
+          <View style={styles.modalSheet} {...panResponder.panHandlers}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>{editingId ? 'Edit Account' : 'New Account'}</Text>
 
@@ -440,16 +455,16 @@ export default function Home() {
             )}
 
             <View style={styles.modalBtns}>
-              <TouchableOpacity 
-                style={[styles.modalCancelBtn, isSaving && { opacity: 0.5 }]} 
+              <TouchableOpacity
+                style={[styles.modalCancelBtn, isSaving && { opacity: 0.5 }]}
                 onPress={() => !isSaving && setModalVisible(false)}
                 disabled={isSaving}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
-                activeOpacity={0.85} 
-                onPress={handleSave} 
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleSave}
                 style={[styles.modalSaveBtnContainer, isSaving && { opacity: 0.5 }]}
                 disabled={isSaving}
               >
@@ -522,8 +537,8 @@ const styles = StyleSheet.create({
   fabTooltipText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   fab: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 12 },
   fabPlus: { fontSize: 32, fontWeight: '500', color: '#fff', marginTop: -2 },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
-  modalWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.6)' },
+  modalWrap: { flex: 1, justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#1a1a2e', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: Platform.OS === 'ios' ? 48 : 28 },
   modalHandle: { width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 20 },

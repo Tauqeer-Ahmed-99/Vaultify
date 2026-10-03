@@ -11,6 +11,7 @@ import {
   Platform,
   Pressable,
   ActivityIndicator,
+  PanResponder,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -67,6 +68,19 @@ export default function AccountDetail() {
     showCancel?: boolean;
     isActionLoading?: boolean;
   }>({ visible: false, title: '', message: '' });
+
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return gestureState.dy > 15 && Math.abs(gestureState.dx) < 20;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 50) {
+          setModalVisible(false);
+        }
+      },
+    })
+  ).current;
 
   if (!account) {
     return (
@@ -348,10 +362,10 @@ export default function AccountDetail() {
       <Modal visible={modalVisible} transparent animationType="slide">
         <Pressable style={styles.backdrop} onPress={() => setModalVisible(false)} />
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
           style={styles.modalWrap}
         >
-          <View style={styles.modalSheet}>
+          <View style={styles.modalSheet} {...panResponder.panHandlers}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>
               {editingTxnId ? 'Edit Transaction' : (paymentType === 'received' ? 'Record Incoming' : 'Record Outgoing')}
@@ -498,7 +512,7 @@ const styles = StyleSheet.create({
   bottomBtnIcon: { fontSize: 18, color: '#fff', marginRight: 6, fontWeight: '700' },
   bottomBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
-  modalWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  modalWrap: { flex: 1, justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#1a1a2e', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: Platform.OS === 'ios' ? 48 : 28 },
   modalHandle: { width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 20 },
