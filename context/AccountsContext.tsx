@@ -1,243 +1,341 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { equalTo, get, onValue, orderByChild, push, query, ref, runTransaction, set, update } from 'firebase/database';
 import { database } from '../firebaseConfig';
-import { ref, get, push, update } from 'firebase/database';
 import { useAuth } from './AuthContext';
-import { Account, Transaction } from '../types';
-import { Alert } from 'react-native';
+import { Account, AccountInput, Membership, MembershipStatus, PersonalLedgerContact, PersonalLedgerReference, Transaction, TransactionInput } from '../types';
+import { findMember, findVerifiedLedgerContact } from '../services/identity';
 
 interface AccountsContextType {
   accounts: Account[];
+  memberships: Membership[];
   isLoading: boolean;
+  error: string | null;
   fetchAccounts: () => Promise<void>;
-  addAccount: (account: Omit<Account, 'id' | 'transactions'>) => Promise<void>;
-  editAccount: (accountId: string, data: Partial<Omit<Account, 'id' | 'transactions'>>) => Promise<void>;
+  addAccount: (account: AccountInput, kind?: Account['kind'], contact?: PersonalLedgerContact | null) => Promise<string>;
+  editAccount: (accountId: string, data: AccountInput, contact?: PersonalLedgerContact | null) => Promise<void>;
+  setAccountIncludedInTotalAssets: (accountId: string, included: boolean) => Promise<void>;
   deleteAccounts: (ids: string[]) => Promise<void>;
-  addTransaction: (accountId: string, txn: Omit<Transaction, 'id'>) => Promise<void>;
-  editTransaction: (accountId: string, txnId: string, data: Partial<Omit<Transaction, 'id'>>) => Promise<void>;
+  addTransaction: (accountId: string, txn: TransactionInput) => Promise<void>;
+  editTransaction: (accountId: string, txnId: string, data: TransactionInput) => Promise<void>;
   deleteTransactions: (accountId: string, txnIds: string[]) => Promise<void>;
+  inviteMember: (accountId: string, identifier: string) => Promise<void>;
+  changeMembership: (membership: Membership, status: MembershipStatus) => Promise<void>;
+  canEditTransaction: (account: Account, txn: Transaction) => boolean;
   getTotalAssets: () => number;
   getAccountBalance: (account: Account) => number;
 }
 
-const AccountsContext = createContext<AccountsContextType>({
-  accounts: [],
-  isLoading: false,
-  fetchAccounts: async () => {},
-  addAccount: async () => {},
-  editAccount: async () => {},
-  deleteAccounts: async () => {},
-  addTransaction: async () => {},
-  editTransaction: async () => {},
-  deleteTransactions: async () => {},
-  getTotalAssets: () => 0,
-  getAccountBalance: () => 0,
-});
+const AccountsContext = createContext<AccountsContextType | null>(null);
+export const useAccounts = () => {
+  const context = useContext(AccountsContext);
+  if (!context) throw new Error('useAccounts must be used within AccountsProvider');
+  return context;
+};
 
-export const useAccounts = () => useContext(AccountsContext);
-
-export const AccountsProvider = ({ children }: { children: React.ReactNode }) => {
+export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  // Auth changes discard all cached account data and listeners.
+  return <AccountsSession key={user?.uid || 'signed-out'}>{children}</AccountsSession>;
+}
+
+function decodeAccount(id: string, raw: any, kind: Account['kind'], personalOwner: string, viewerUid = personalOwner): Account {
+  const isLinkedViewer = kind === 'personal' && viewerUid !== personalOwner;
+  const transactions: Transaction[] = Object.entries(raw.transactions || {}).map(([txnId, txn]: [string, any]) => ({
+    ...txn, id: txnId, amount: Number(txn.amount) || 0,
+    payment: isLinkedViewer ? txn.payment === 'sent' ? 'received' : 'sent' : txn.payment,
+    reason: txn.reason || '', date: txn.date || '',
+    ownerUid: txn.ownerUid || (kind === 'personal' ? personalOwner : undefined),
+  }));
+  return {
+    id: isLinkedViewer ? `linked_${personalOwner}_${id}` : id, kind,
+    includeInTotalAssets: kind === 'personal' || raw.includeInTotalAssets !== false,
+    ownerUid: kind === 'personal' ? personalOwner : raw.ownerUid,
+    ownerName: raw.ownerName,
+    sourceAccountId: id,
+    isLinkedViewer,
+    linkedUserUid: raw.linkedUserUid,
+    linkedUserName: raw.linkedUserName,
+    linkedIdentifier: raw.linkedIdentifier,
+    accountName: raw.accountName || 'Untitled',
+    accountDescripton: raw.accountDescripton || '',
+    accountStartingDate: raw.accountStartingDate || '',
+    colorIndex: raw.colorIndex,
+    createdAt: raw.createdAt,
+    updatedAt: transactions.reduce((latest, txn) => txn.updatedAt && txn.updatedAt > latest ? txn.updatedAt : latest, raw.updatedAt || ''),
+    transactions,
+  };
+}
+
+function validateAccount(data: AccountInput): AccountInput {
+  const name = data.accountName.trim();
+  if (!name || name.length > 80) throw new Error('Use an account name between 1 and 80 characters.');
+  if (data.accountDescripton.length > 500) throw new Error('Keep the description under 500 characters.');
+  if (!Number.isFinite(Date.parse(data.accountStartingDate))) throw new Error('Choose a valid starting date.');
+  return { ...data, accountName: name, accountDescripton: data.accountDescripton.trim() };
+}
+
+function validateTransaction(txn: TransactionInput): TransactionInput {
+  if (!Number.isFinite(txn.amount) || txn.amount <= 0 || txn.amount > 1e12) throw new Error('Enter a valid amount up to 1 trillion.');
+  if (!['sent', 'received'].includes(txn.payment)) throw new Error('Choose a payment direction.');
+  if (!Number.isFinite(Date.parse(txn.date))) throw new Error('Choose a valid transaction date.');
+  if (txn.reason.length > 500) throw new Error('Keep the transaction note under 500 characters.');
+  return { amount: txn.amount, payment: txn.payment, date: txn.date, reason: txn.reason.trim() };
+}
+
+function AccountsSession({ children }: { children: React.ReactNode }) {
+  const { user, profile } = useAuth();
+  const uid = user?.uid;
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const fetchAccounts = useCallback(async () => {
-    if (!user) {
-      setAccounts([]);
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const dbRef = ref(database, `accounts/${user.uid}`);
-      const snapshot = await get(dbRef);
-      const data = snapshot.val();
-
-      if (data) {
-        const loaded: Account[] = Object.keys(data).map((key, index) => {
-          const raw = data[key];
-          let transactions: Transaction[] = [];
-          if (raw.transactions && typeof raw.transactions === 'object') {
-            transactions = Object.keys(raw.transactions).map((txnKey) => ({
-              id: txnKey,
-              amount: Number(raw.transactions[txnKey].amount) || 0,
-              payment: raw.transactions[txnKey].payment || 'received',
-              date: raw.transactions[txnKey].date || '',
-              reason: raw.transactions[txnKey].reason || '',
-              createdAt: raw.transactions[txnKey].createdAt || '',
-              updatedAt: raw.transactions[txnKey].updatedAt || '',
-            }));
-          }
-          
-          let cIndex = raw.colorIndex;
-          if (cIndex === undefined) {
-             cIndex = index % 8;
-             // Save it back to DB asynchronously so it's permanently locked
-             update(ref(database, `accounts/${user.uid}/${key}`), { colorIndex: cIndex }).catch(() => {});
-          }
-
-          return {
-            id: key,
-            accountName: raw.accountName || 'Untitled',
-            accountDescripton: raw.accountDescripton || '',
-            accountStartingDate: raw.accountStartingDate || '',
-            transactions,
-            createdAt: raw.createdAt || '',
-            updatedAt: raw.updatedAt || '',
-            colorIndex: cIndex,
-          };
-        });
-        setAccounts(loaded);
-      } else {
-        setAccounts([]);
-      }
-    } catch (error: any) {
-      console.error('fetchAccounts error:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user]);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [isLoading, setIsLoading] = useState(!!uid);
+  const [error, setError] = useState<string | null>(null);
+  const [subscriptionVersion, setSubscriptionVersion] = useState(0);
 
   useEffect(() => {
-    if (user) {
-      fetchAccounts();
-    } else {
-      setAccounts([]);
-    }
-  }, [user, fetchAccounts]);
-
-  const addAccount = async (accountData: Omit<Account, 'id' | 'transactions'>) => {
-    if (!user) return;
-    try {
-      const now = new Date().toISOString();
-      // Get the next sequential color index (0-4) based on current accounts array length
-      // If accounts length is not yet fetched properly, fallback to 0.
-      let nextIndex = 0;
-      setAccounts((prev) => {
-        nextIndex = prev.length % 5;
-        return prev;
-      });
-      
-      await push(ref(database, `accounts/${user.uid}`), {
-        ...accountData,
-        createdAt: now,
-        updatedAt: now,
-        colorIndex: nextIndex,
-      });
-      await fetchAccounts();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to add account.');
-    }
-  };
-
-  const editAccount = async (accountId: string, data: Partial<Omit<Account, 'id' | 'transactions'>>) => {
-    if (!user) return;
-    try {
-      const now = new Date().toISOString();
-      await update(ref(database, `accounts/${user.uid}/${accountId}`), {
-        ...data,
-        updatedAt: now,
-      });
-      await fetchAccounts();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update account.');
-    }
-  };
-
-  const deleteAccounts = async (ids: string[]) => {
-    if (!user) return;
-    try {
-      const updates: Record<string, null> = {};
-      ids.forEach((id) => { updates[id] = null; });
-      await update(ref(database, `accounts/${user.uid}`), updates);
-      await fetchAccounts();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to delete account(s).');
-    }
-  };
-
-  const addTransaction = async (accountId: string, txn: Omit<Transaction, 'id'>) => {
-    if (!user) return;
-    try {
-      const now = new Date().toISOString();
-      await push(ref(database, `accounts/${user.uid}/${accountId}/transactions`), {
-        ...txn,
-        createdAt: now,
-        updatedAt: now,
-      });
-      // also update account updatedAt
-      await update(ref(database, `accounts/${user.uid}/${accountId}`), {
-        updatedAt: now,
-      });
-      await fetchAccounts();
-    } catch (error) {
-      Alert.alert('Error', 'Transaction failed.');
-    }
-  };
-
-  const editTransaction = async (accountId: string, txnId: string, data: Partial<Omit<Transaction, 'id'>>) => {
-    if (!user) return;
-    try {
-      const now = new Date().toISOString();
-      await update(ref(database, `accounts/${user.uid}/${accountId}/transactions/${txnId}`), {
-        ...data,
-        updatedAt: now,
-      });
-      await update(ref(database, `accounts/${user.uid}/${accountId}`), {
-        updatedAt: now,
-      });
-      await fetchAccounts();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update transaction.');
-    }
-  };
-
-  const deleteTransactions = async (accountId: string, txnIds: string[]) => {
-    if (!user) return;
-    try {
-      const updates: Record<string, null> = {};
-      txnIds.forEach((id) => { updates[id] = null; });
-      const now = new Date().toISOString();
-      await update(ref(database, `accounts/${user.uid}/${accountId}/transactions`), updates);
-      await update(ref(database, `accounts/${user.uid}/${accountId}`), {
-        updatedAt: now,
-      });
-      await fetchAccounts();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to delete transaction(s).');
-    }
-  };
-
-  const getAccountBalance = (account: Account): number => {
-    let bal = 0;
-    account.transactions.forEach((txn) => {
-      if (txn.payment === 'sent') bal += txn.amount;
-      else bal -= txn.amount;
+    if (!uid) return;
+    let active = true;
+    let personal: Account[] = [];
+    let owned: Account[] = [];
+    let invitations: Membership[] = [];
+    const shared = new Map<string, Account>();
+    const linked = new Map<string, Account>();
+    const stops = new Map<string, () => void>();
+    const linkedStops = new Map<string, () => void>();
+    const waiting = new Set<string>();
+    const ready = new Set<string>();
+    const publish = () => {
+      if (!active) return;
+      const all = new Map([...personal, ...owned, ...shared.values(), ...linked.values()].map(account => [account.id, account]));
+      setAccounts([...all.values()]);
+      setMemberships(invitations);
+      setIsLoading(ready.size < 4 || waiting.size > 0);
+    };
+    const failed = (source: string) => {
+      if (!active) return;
+      ready.add(source);
+      setError('Some accounts could not be loaded. Check your connection and retry.');
+      publish();
+    };
+    const stopPersonal = onValue(ref(database, `accounts/${uid}`), snapshot => {
+      personal = Object.entries(snapshot.val() || {}).map(([id, raw]) => decodeAccount(id, raw, 'personal', uid));
+      ready.add('personal'); publish();
+    }, () => { personal = []; failed('personal'); });
+    const stopOwned = onValue(query(ref(database, 'groupAccounts'), orderByChild('ownerUid'), equalTo(uid)), snapshot => {
+      owned = Object.entries(snapshot.val() || {}).map(([id, raw]) => decodeAccount(id, raw, 'group', uid));
+      ready.add('owned'); publish();
+    }, () => { owned = []; failed('owned'); });
+    const stopInvites = onValue(query(ref(database, 'memberships'), orderByChild('recipientUid'), equalTo(uid)), snapshot => {
+      invitations = Object.entries(snapshot.val() || {}).map(([id, raw]) => ({ ...(raw as Omit<Membership, 'id'>), id }));
+      const joined = new Set(invitations.filter(item => item.status === 'accepted').map(item => item.accountId));
+      for (const [id, stop] of stops) {
+        if (!joined.has(id)) { stop(); stops.delete(id); shared.delete(id); waiting.delete(id); }
+      }
+      for (const id of joined) {
+        if (stops.has(id)) continue;
+        waiting.add(id);
+        const stop = onValue(ref(database, `groupAccounts/${id}`), accountSnapshot => {
+          if (accountSnapshot.exists()) shared.set(id, decodeAccount(id, accountSnapshot.val(), 'group', uid));
+          else shared.delete(id);
+          waiting.delete(id); publish();
+        }, () => {
+          shared.delete(id); waiting.delete(id);
+          if (active) publish();
+        });
+        stops.set(id, stop);
+      }
+      ready.add('invitations'); publish();
+    }, () => {
+      invitations = [];
+      stops.forEach(stop => stop()); stops.clear(); shared.clear(); waiting.clear();
+      failed('invitations');
     });
-    return bal;
-  };
+    const stopLinks = onValue(ref(database, `personalLinks/${uid}`), snapshot => {
+      const references = new Map<string, PersonalLedgerReference>(Object.entries(snapshot.val() || {}));
+      for (const [key, stop] of linkedStops) {
+        if (!references.has(key)) {
+          stop(); linkedStops.delete(key); linked.delete(key); waiting.delete(`personal:${key}`);
+        }
+      }
+      for (const [key, reference] of references) {
+        if (linkedStops.has(key) || reference.ownerUid === uid) continue;
+        waiting.add(`personal:${key}`);
+        const stop = onValue(ref(database, `accounts/${reference.ownerUid}/${reference.accountId}`), accountSnapshot => {
+          const raw = accountSnapshot.val();
+          if (raw && raw.linkedUserUid === uid) linked.set(key, decodeAccount(reference.accountId, raw, 'personal', reference.ownerUid, uid));
+          else linked.delete(key);
+          waiting.delete(`personal:${key}`); publish();
+        }, () => {
+          linked.delete(key); waiting.delete(`personal:${key}`); publish();
+        });
+        linkedStops.set(key, stop);
+      }
+      ready.add('links'); publish();
+    }, () => {
+      linkedStops.forEach(stop => stop()); linkedStops.clear(); linked.clear();
+      for (const key of waiting) { if (key.startsWith('personal:')) waiting.delete(key); }
+      failed('links');
+    });
+    return () => {
+      active = false;
+      stopPersonal(); stopOwned(); stopInvites(); stopLinks();
+      stops.forEach(stop => stop()); linkedStops.forEach(stop => stop());
+    };
+  }, [uid, subscriptionVersion]);
 
-  const getTotalAssets = (): number => {
-    let total = 0;
-    accounts.forEach((acc) => { total += getAccountBalance(acc); });
-    return total;
+  const requireUser = () => {
+    if (!user) throw new Error('Sign in to continue.');
+    return user;
   };
+  const requireAccount = (id: string, ownerOnly = false) => {
+    const current = requireUser();
+    const account = accounts.find(item => item.id === id);
+    if (!account) throw new Error('This account is no longer available.');
+    if (ownerOnly && account.ownerUid !== current.uid) throw new Error('Only the account creator can manage this account.');
+    return account;
+  };
+  const accountPath = (account: Account) => account.kind === 'group' ? `groupAccounts/${account.id}` : `accounts/${account.ownerUid}/${account.sourceAccountId || account.id}`;
+  const displayName = (profile?.username ? `@${profile.username}` : user?.displayName || 'Vaultify member').slice(0, 100);
+  const canEditTransaction = (account: Account, txn: Transaction) => !!uid && (account.kind === 'personal' ? account.ownerUid === uid : txn.ownerUid === uid);
 
-  return (
-    <AccountsContext.Provider
-      value={{
-        accounts,
-        isLoading,
-        fetchAccounts,
-        addAccount,
-        editAccount,
-        deleteAccounts,
-        addTransaction,
-        editTransaction,
-        deleteTransactions,
-        getTotalAssets,
-        getAccountBalance,
-      }}
-    >
-      {children}
-    </AccountsContext.Provider>
-  );
-};
+  const resolveContact = async (contact: PersonalLedgerContact) => {
+    const verified = await findVerifiedLedgerContact(contact.identifier);
+    if (verified.uid !== contact.uid) throw new Error('This contact changed. Verify the email or username again.');
+    return verified;
+  };
+  const linkPath = (recipientUid: string, ownerUid: string, accountId: string) => `personalLinks/${recipientUid}/${ownerUid}_${accountId}`;
+
+  const addAccount = async (input: AccountInput, kind: Account['kind'] = 'personal', contact?: PersonalLedgerContact | null) => {
+    const current = requireUser();
+    const data = validateAccount(input);
+    const now = new Date().toISOString();
+    const target = push(ref(database, kind === 'group' ? 'groupAccounts' : `accounts/${current.uid}`));
+    const verified = kind === 'personal' && contact ? await resolveContact(contact) : null;
+    const accountData = { ...data, ...(kind === 'group' ? { includeInTotalAssets: true } : {}),
+      ...(verified ? { linkedUserUid: verified.uid, linkedUserName: verified.name, linkedIdentifier: verified.identifier } : {}),
+      ownerUid: current.uid, ownerName: displayName, createdAt: now, updatedAt: now, colorIndex: accounts.length % 8 };
+    if (verified) {
+      await update(ref(database), {
+        [`accounts/${current.uid}/${target.key}`]: accountData,
+        [linkPath(verified.uid, current.uid, target.key!)]: { ownerUid: current.uid, accountId: target.key },
+      });
+    } else await set(target, accountData);
+    return target.key!;
+  };
+  const editAccount = async (id: string, input: AccountInput, contact?: PersonalLedgerContact | null) => {
+    const account = requireAccount(id, true);
+    const data = { ...validateAccount(input), updatedAt: new Date().toISOString() };
+    if (account.kind === 'group' || contact === undefined) {
+      await update(ref(database, accountPath(account)), data);
+      return;
+    }
+    const verified = contact ? await resolveContact(contact) : null;
+    const changes: Record<string, unknown> = {};
+    const path = accountPath(account);
+    for (const [key, value] of Object.entries(data)) changes[`${path}/${key}`] = value;
+    changes[`${path}/linkedUserUid`] = verified?.uid || null;
+    changes[`${path}/linkedUserName`] = verified?.name || null;
+    changes[`${path}/linkedIdentifier`] = verified?.identifier || null;
+    changes[`${path}/ownerName`] = displayName;
+    if (account.linkedUserUid && account.linkedUserUid !== verified?.uid) {
+      changes[linkPath(account.linkedUserUid, account.ownerUid, account.sourceAccountId || id)] = null;
+    }
+    if (verified) changes[linkPath(verified.uid, account.ownerUid, account.sourceAccountId || id)] = { ownerUid: account.ownerUid, accountId: account.sourceAccountId || id };
+    await update(ref(database), changes);
+  };
+  const setAccountIncludedInTotalAssets = async (id: string, included: boolean) => {
+    const account = requireAccount(id, true);
+    if (account.kind !== 'group') throw new Error('Only group ledgers can be excluded from Total Assets.');
+    if (typeof included !== 'boolean') throw new Error('Choose whether to include this ledger in Total Assets.');
+    await update(ref(database, accountPath(account)), {
+      includeInTotalAssets: included,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+  const deleteAccounts = async (ids: string[]) => {
+    const targets = ids.map(id => requireAccount(id, true));
+    const changes: Record<string, null> = {};
+    for (const account of targets) {
+      changes[accountPath(account)] = null;
+      if (account.kind === 'personal' && account.linkedUserUid) changes[linkPath(account.linkedUserUid, account.ownerUid, account.sourceAccountId || account.id)] = null;
+      if (account.kind === 'group') {
+        const members = await get(query(ref(database, 'memberships'), orderByChild('accountId'), equalTo(account.id)));
+        members.forEach(member => { changes[`memberships/${member.key}`] = null; });
+      }
+    }
+    if (targets.length) await update(ref(database), changes);
+  };
+  const addTransaction = async (id: string, input: TransactionInput) => {
+    requireUser();
+    const account = requireAccount(id);
+    if (account.kind === 'personal' && account.ownerUid !== uid) throw new Error('Only the creator can add transactions to this personal ledger.');
+    const now = new Date().toISOString();
+    const txnId = push(ref(database, `${accountPath(account)}/transactions`)).key!;
+    await update(ref(database, accountPath(account)), {
+      [`transactions/${txnId}`]: { ...validateTransaction(input), ownerUid: uid, ownerName: displayName, createdAt: now, updatedAt: now },
+      updatedAt: now,
+    });
+  };
+  const requireOwnedTransactions = (account: Account, ids: string[]) => {
+    for (const id of ids) {
+      const txn = account.transactions.find(item => item.id === id);
+      if (!txn) throw new Error('A selected transaction was already removed.');
+      if (!canEditTransaction(account, txn)) throw new Error('You can only change your own transactions.');
+    }
+  };
+  const editTransaction = async (id: string, txnId: string, input: TransactionInput) => {
+    const account = requireAccount(id);
+    requireOwnedTransactions(account, [txnId]);
+    const validated = validateTransaction(input);
+    const now = new Date().toISOString();
+    // Do not recreate a transaction another device deleted during this edit.
+    const target = ref(database, `${accountPath(account)}/transactions/${txnId}`);
+    await get(target);
+    const result = await runTransaction(target, current => {
+      if (!current) return;
+      return { ...current, ...validated, updatedAt: now };
+    }, { applyLocally: false });
+    if (!result.committed) throw new Error('This transaction was removed. Refresh the account.');
+  };
+  const deleteTransactions = async (id: string, txnIds: string[]) => {
+    const account = requireAccount(id);
+    requireOwnedTransactions(account, txnIds);
+    const changes: Record<string, string | null> = { updatedAt: new Date().toISOString() };
+    txnIds.forEach(txnId => { changes[`transactions/${txnId}`] = null; });
+    if (txnIds.length) await update(ref(database, accountPath(account)), changes);
+  };
+  const inviteMember = async (id: string, identifier: string) => {
+    const account = requireAccount(id, true);
+    if (account.kind !== 'group') throw new Error('Invitations are available for group accounts.');
+    const member = await findMember(identifier);
+    if (member.uid === uid) throw new Error('You already own this account.');
+    const now = new Date().toISOString();
+    const result = await runTransaction(ref(database, `memberships/${id}_${member.uid}`), current => {
+      if (current?.status === 'pending' || current?.status === 'accepted') return;
+      return { accountId: id, accountName: account.accountName, recipientUid: member.uid, recipientName: member.name, invitedBy: uid, inviterName: displayName, status: 'pending', createdAt: now, updatedAt: now };
+    }, { applyLocally: false });
+    if (!result.committed) throw new Error('This person is already a member or has a pending invitation.');
+  };
+  const changeMembership = async (membership: Membership, status: MembershipStatus) => {
+    requireUser();
+    const transitions: Partial<Record<MembershipStatus, MembershipStatus[]>> = {
+      pending: membership.recipientUid === uid ? ['accepted', 'rejected'] : ['cancelled'],
+      accepted: membership.recipientUid === uid ? ['left'] : ['removed'],
+    };
+    if (!transitions[membership.status]?.includes(status)) throw new Error('This invitation or membership has already changed.');
+    const target = ref(database, `memberships/${membership.id}`);
+    await get(target);
+    const result = await runTransaction(target, current => {
+      if (!current || current.status !== membership.status || current.createdAt !== membership.createdAt) return;
+      return { ...current, status, updatedAt: new Date().toISOString() };
+    }, { applyLocally: false });
+    if (!result.committed) throw new Error('This invitation or membership has already changed.');
+  };
+  const getAccountBalance = (account: Account) => account.transactions.reduce((total, txn) => total + (txn.payment === 'sent' ? txn.amount : -txn.amount), 0);
+
+  return <AccountsContext.Provider value={{ accounts, memberships, isLoading, error,
+    fetchAccounts: async () => { setIsLoading(true); setError(null); setSubscriptionVersion(value => value + 1); },
+    addAccount, editAccount, setAccountIncludedInTotalAssets, deleteAccounts, addTransaction, editTransaction, deleteTransactions,
+    inviteMember, changeMembership, canEditTransaction, getAccountBalance,
+    getTotalAssets: () => accounts.reduce((total, account) => total + (account.includeInTotalAssets ? getAccountBalance(account) : 0), 0),
+  }}>{children}</AccountsContext.Provider>;
+}

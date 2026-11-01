@@ -1,10 +1,12 @@
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { AuthProvider, useAuth } from '../context/AuthContext';
-import { AccountsProvider } from '../context/AccountsContext';
+import { AuthProvider, useAuth } from '../../context/AuthContext';
+import { AccountsProvider } from '../../context/AccountsContext';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AppThemeProvider, colors as c } from '../../theme/AppTheme';
+import { accountsRoute } from '../../navigation/routes';
 
 function InitialLayout() {
   const { user, isLoading } = useAuth();
@@ -19,9 +21,9 @@ function InitialLayout() {
     if (!user && !inAuthGroup) {
       router.replace('/(auth)/login' as any);
     } else if (user && inAuthGroup) {
-      router.replace('/(main)' as any);
+      router.replace(accountsRoute);
     }
-  }, [user, isLoading]);
+  }, [user, isLoading, segments, router]);
 
   if (isLoading) {
     return (
@@ -37,12 +39,14 @@ function InitialLayout() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <AccountsProvider>
-          <StatusBar style="light" translucent backgroundColor="transparent" />
-          <InitialLayout />
-        </AccountsProvider>
-      </AuthProvider>
+      <AppThemeProvider>
+        <AuthProvider>
+          <AccountsProvider>
+            <StatusBar style="light" />
+            <InitialLayout />
+          </AccountsProvider>
+        </AuthProvider>
+      </AppThemeProvider>
     </SafeAreaProvider>
   );
 }
@@ -52,6 +56,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f0c29',
+    backgroundColor: c.background,
   },
 });
