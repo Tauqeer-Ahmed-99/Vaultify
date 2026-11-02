@@ -1,6 +1,6 @@
 # Releases
 
-Current deployed version: **1.0.0**. Update this after publishing a new stable release. Full changelogs and build metadata live in [GitHub Releases](https://github.com/Tauqeer-Ahmed-99/Vaultify/releases).
+Current deployed version: **2.0.0**. Update this after publishing a new stable release. Full changelogs and build metadata live in [GitHub Releases](https://github.com/Tauqeer-Ahmed-99/Vaultify/releases).
 
 ## Release instructions
 
@@ -29,5 +29,7 @@ gh release view $version --json tagName,publishedAt,url,assets,body
 References: [Expo version management](https://docs.expo.dev/build-reference/app-versions/), [APK builds](https://docs.expo.dev/build-reference/apk/), [EAS CLI](https://docs.expo.dev/eas/cli/), [gh release create](https://cli.github.com/manual/gh_release_create), [gh release edit](https://cli.github.com/manual/gh_release_edit), [gh release upload](https://cli.github.com/manual/gh_release_upload).
 
 ## Release history
+
+### [2.0.0](https://github.com/Tauqeer-Ahmed-99/Vaultify/releases/tag/2.0.0) | 2026-11-02T10:34:57Z
 
 ### [1.0.0](https://github.com/Tauqeer-Ahmed-99/Vaultify/releases/tag/1.0.0) | 2026-10-04T13:42:36Z
