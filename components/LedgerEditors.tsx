@@ -91,6 +91,7 @@ export function TransactionEditor({ accountId, transaction, direction, onClose, 
   const [reason, setReason] = useState(transaction?.reason || '');
   const [date, setDate] = useState(initialDate(transaction?.date));
   const [busy, setBusy] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [amountTouched, setAmountTouched] = useState(false);
   const validAmount = /^\d*(?:\.\d{0,2})?$/.test(amount.trim()) && Number(amount) > 0 && Number(amount) <= 1e12;
@@ -100,11 +101,25 @@ export function TransactionEditor({ accountId, transaction, direction, onClose, 
     try {
       const data = { amount: Number(amount), payment, reason: reason.trim(), date: date.toISOString() };
       if (transaction) await editTransaction(accountId, transaction.id, data);
-      else await addTransaction(accountId, data);
+      else {
+        const result = await addTransaction(accountId, data);
+        if (result.notification === 'suppressed') {
+          setSavedNotice('Your entry is saved. No other members could be notified. They may need to enable notifications on their devices or check their notification settings.');
+          return;
+        }
+        if (result.notification === 'failed' || result.notification === 'partial' || result.notification === 'unknown') {
+          setSavedNotice('Your entry is saved. Notification delivery to other members could not be completed or confirmed. You do not need to save this entry again.');
+          return;
+        }
+      }
       onSaved();
     } catch (error) { setFailure(errorMessage(error)); }
     finally { setBusy(false); }
   };
+  if (savedNotice) return <FormSheet visible title="Transaction saved" onClose={onSaved}>
+    <Notice message={savedNotice} />
+    <Button label="Done" onPress={onSaved} />
+  </FormSheet>;
   return <FormSheet visible title={transaction ? 'Edit Transaction' : 'New Transaction'} busy={busy} onClose={onClose}>
     <SegmentedControl value={payment} onChange={setPayment} disabled={busy}
       options={[{ value: 'received', label: 'Received' }, { value: 'sent', label: 'Sent' }]} />

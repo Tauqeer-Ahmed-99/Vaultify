@@ -25,17 +25,40 @@ export class HttpError extends Error {
 // Fail closed at a conservative size; see deployment guide's scaling boundary.
 export async function atomic(change: (root: Root) => void) {
   const target = db().ref();
-  await target.get(); // transaction callbacks can initially see a cold null cache
-  const result = await target.transaction((value: Root | null) => {
-    const root = value || {};
-    if (Buffer.byteLength(JSON.stringify(root)) > 16 * 1024 * 1024) {
-      throw new HttpError(503, 'Database capacity requires operator attention.');
+  const keepCache = () => {};
+  try {
+    // get()/once() alone release their cache before transaction() starts. Keep
+    // this request's snapshot subscribed through CAS, including its retries, so
+    // authorization never mistakes an uninitialized cache for a deleted ledger.
+    await new Promise<void>((resolve, reject) => {
+      target.on('value', keepCache, reject);
+      target.once('value').then(() => resolve(), reject);
+    });
+    let rejection: unknown;
+    const result = await target.transaction((value: Root | null) => {
+      rejection = undefined;
+      try {
+        const root = value || {};
+        if (Buffer.byteLength(JSON.stringify(root)) > 16 * 1024 * 1024) {
+          throw new HttpError(503, 'Database capacity requires operator attention.');
+        }
+        change(root);
+        if (Buffer.byteLength(JSON.stringify(root)) > 16 * 1024 * 1024) {
+          throw new HttpError(503, 'Database capacity requires operator attention.');
+        }
+        return root;
+      } catch (error) {
+        // Abort normally so Firebase also removes its internal transaction
+        // listener. Throwing here can escape a retry's asynchronous callback.
+        rejection = error;
+        return undefined;
+      }
+    }, undefined, false);
+    if (!result.committed) {
+      if (rejection) throw rejection;
+      throw new HttpError(409, 'Data changed. Retry the same operation.');
     }
-    change(root);
-    if (Buffer.byteLength(JSON.stringify(root)) > 16 * 1024 * 1024) {
-      throw new HttpError(503, 'Database capacity requires operator attention.');
-    }
-    return root;
-  }, undefined, false);
-  if (!result.committed) throw new HttpError(409, 'Data changed. Retry the same operation.');
+  } finally {
+    target.off('value', keepCache);
+  }
 }

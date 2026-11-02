@@ -13,7 +13,10 @@ export async function notificationApi<T>(path: string, data?: unknown, user: Use
   const response = await fetch(`${base}/api/${path}`, {
     method: data === undefined ? 'GET' : 'POST',
     headers: { Authorization: `Bearer ${await user.getIdToken()}`, 'Content-Type': 'application/json' },
-    ...(data !== undefined ? { body: JSON.stringify(data) } : {}), signal: AbortSignal.timeout(25_000),
+    ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
+    // Mutations await the one-shot push attempt in a 60-second function. Do not
+    // abandon a committed save at 25 seconds while that request is still running.
+    signal: AbortSignal.timeout(path === 'mutations' ? 70_000 : 25_000),
   });
   const result = await response.json();
   if (!response.ok) throw new ApiError(result.error || 'Could not save. Retry shortly.', response.status);

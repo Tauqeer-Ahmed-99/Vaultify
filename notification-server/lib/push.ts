@@ -20,9 +20,17 @@ export async function sendOnce(event: NotificationEvent): Promise<NotificationSu
       try {
         const devices = (await db().ref(`pushDevices/${recipient.uid}`).orderByKey().limitToFirst(10).get()).val() as Record<string, Device> || {};
         const active = Object.entries(devices).filter(([, device]) => device.uid === recipient.uid && device.expiresAt > Date.now() && !seenTokens.has(device.token));
-        if (!active.length) { summary.suppressedRecipients += 1; continue; }
+        if (!active.length) {
+          summary.suppressedRecipients += 1;
+          console.info(JSON.stringify({ code: 'push_suppressed', eventId: event.id, reason: 'no_active_devices' }));
+          continue;
+        }
         const allowed = await context(event, recipient);
-        if (!allowed) { summary.suppressedRecipients += 1; continue; }
+        if (!allowed) {
+          summary.suppressedRecipients += 1;
+          console.info(JSON.stringify({ code: 'push_suppressed', eventId: event.id, reason: 'access_or_preferences' }));
+          continue;
+        }
         if (Date.now() + 1000 >= deadline) { summary.skippedRecipients += 1; continue; }
         const messages = [];
         for (const [deviceId, device] of active) {
@@ -50,6 +58,10 @@ export async function sendOnce(event: NotificationEvent): Promise<NotificationSu
           if (ticket?.status === 'ok') summary.acceptedDevices += 1;
           else if (ticket?.status === 'error') {
             summary.failedDevices += 1;
+            // Keep provider error codes for diagnosis, never tokens or messages.
+            const providerCode = ticket.details?.error;
+            console.warn(JSON.stringify({ code: 'push_ticket_rejected', eventId: event.id,
+              providerCode: providerCode && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(providerCode) ? providerCode : 'unknown' }));
             if (ticket.details?.error === 'DeviceNotRegistered') {
               await invalidate(targets[index]).catch(() => {
                 console.warn(JSON.stringify({ code: 'device_cleanup_failed', eventId: event.id }));
@@ -68,6 +80,7 @@ export async function sendOnce(event: NotificationEvent): Promise<NotificationSu
   summary.status = summary.acceptedDevices ? lost ? 'partial' : 'accepted'
     : summary.unknownDevices || summary.skippedRecipients ? 'unknown'
     : summary.failedDevices ? 'failed' : 'suppressed';
+  console.info(JSON.stringify({ code: 'push_attempt_completed', eventId: event.id, ...summary }));
   return summary;
 }
 
@@ -94,27 +107,33 @@ async function context(event: NotificationEvent, recipient: Recipient) {
   const base = event.kind === 'group' ? `groupAccounts/${event.accountId}` : `accounts/${event.ownerUid}/${event.accountId}`;
   // Exact fields, never a scan of transaction history or the database root.
   const fields = ['ownerUid', 'accountName', 'linkedUserUid', 'linkVersion'] as const;
-  const snapshots = await Promise.all(fields.map(field => db().ref(`${base}/${field}`).get()));
+  const [snapshots, preferencesSnapshot, accessSnapshot, transactionSnapshot] = await Promise.all([
+    Promise.all(fields.map(field => db().ref(`${base}/${field}`).get())),
+    db().ref(`pushPreferences/${recipient.uid}`).get(),
+    event.kind === 'group' ? db().ref(`memberships/${event.accountId}_${recipient.uid}`).get()
+      : db().ref(`personalLinks/${recipient.uid}/${event.ownerUid}_${event.accountId}`).get(),
+    event.type === 'transaction' ? db().ref(`${base}/transactions/${event.transactionId}`).get() : null,
+  ]);
   const ledger = Object.fromEntries(fields.map((field, index) => [field, snapshots[index].val()])) as Ledger;
   if (!ledger.ownerUid || ledger.ownerUid !== event.ownerUid) return null;
-  const preferences = (await db().ref(`pushPreferences/${recipient.uid}`).get()).val();
+  const preferences = preferencesSnapshot.val();
   if (preferences?.enabled === false) return null;
   let transaction: Transaction | null = null;
   if (event.type === 'invitation') {
-    const member = (await db().ref(`memberships/${event.accountId}_${recipient.uid}`).get()).val() as Member | null;
+    const member = accessSnapshot.val() as Member | null;
     if (!member || member.status !== 'pending' || member.invitedBy !== ledger.ownerUid || member.createdAt !== event.invitationVersion) return null;
   } else if (event.kind === 'personal') {
     if (ledger.linkedUserUid !== recipient.uid || (ledger.linkVersion || 'legacy') !== recipient.epoch) return null;
-    const reference = (await db().ref(`personalLinks/${recipient.uid}/${event.ownerUid}_${event.accountId}`).get()).val();
+    const reference = accessSnapshot.val();
     if (reference?.ownerUid !== event.ownerUid || reference.accountId !== event.accountId) return null;
   } else if (recipient.epoch === 'creator') {
     if (recipient.uid !== ledger.ownerUid) return null;
   } else {
-    const member = (await db().ref(`memberships/${event.accountId}_${recipient.uid}`).get()).val() as Member | null;
+    const member = accessSnapshot.val() as Member | null;
     if (!member || member.status !== 'accepted' || member.invitedBy !== ledger.ownerUid || `${member.createdAt}:${member.updatedAt}` !== recipient.epoch) return null;
   }
   if (event.type === 'transaction') {
-    transaction = (await db().ref(`${base}/transactions/${event.transactionId}`).get()).val();
+    transaction = transactionSnapshot!.val();
     if (!transaction) return null;
   }
   return { ledger, transaction, hideDetails: preferences?.hideDetails === true };

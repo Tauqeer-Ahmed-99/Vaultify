@@ -3,7 +3,7 @@ import { equalTo, get, onValue, orderByChild, query, ref, runTransaction, update
 import { database } from '../firebaseConfig';
 import { useAuth } from './AuthContext';
 import { Account, AccountInput, Membership, MembershipStatus, PersonalLedgerContact, PersonalLedgerReference, Transaction, TransactionInput } from '../types';
-import { notificationMutation } from '../services/notificationApi';
+import { MutationResult, notificationMutation } from '../services/notificationApi';
 
 interface AccountsContextType {
   accounts: Account[];
@@ -15,7 +15,7 @@ interface AccountsContextType {
   editAccount: (accountId: string, data: AccountInput, contact?: PersonalLedgerContact | null) => Promise<void>;
   setAccountIncludedInTotalAssets: (accountId: string, included: boolean) => Promise<void>;
   deleteAccounts: (ids: string[]) => Promise<void>;
-  addTransaction: (accountId: string, txn: TransactionInput) => Promise<void>;
+  addTransaction: (accountId: string, txn: TransactionInput) => Promise<MutationResult>;
   editTransaction: (accountId: string, txnId: string, data: TransactionInput) => Promise<void>;
   deleteTransactions: (accountId: string, txnIds: string[]) => Promise<void>;
   inviteMember: (accountId: string, identifier: string) => Promise<void>;
@@ -243,7 +243,7 @@ function AccountsSession({ children }: { children: React.ReactNode }) {
     requireUser();
     const account = requireAccount(id);
     if (account.kind === 'personal' && account.ownerUid !== uid) throw new Error('Only the creator can add transactions to this personal ledger.');
-    await notificationMutation({ action: 'createTransaction', kind: account.kind, ownerUid: account.ownerUid,
+    return notificationMutation({ action: 'createTransaction', kind: account.kind, ownerUid: account.ownerUid,
       accountId: account.sourceAccountId || id, data: validateTransaction(input) });
   };
   const requireOwnedTransactions = (account: Account, ids: string[]) => {
