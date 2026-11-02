@@ -4,6 +4,8 @@ This feature uses the existing Firebase Authentication project and Realtime Data
 
 ## Release
 
+Production rules were deployed to the existing `assets-management-1afc6-default-rtdb` instance at **2026-11-02T10:40:26Z**, after the Android 2.0.0 publication. Exact readback matched the repository rules. Older builds must update for creation, personal-link changes and invitation reissue. See [deployment details and remaining verification](push-notifications.md#current-backend-deployment).
+
 Deploy `database.rules.json` to the same RTDB instance used by `EXPO_PUBLIC_FIREBASE_RTDB_URL` **before releasing the app**. `firebase.json` points the Firebase CLI to this file. Select the correct Firebase project and database instance; no production project alias is committed.
 
 ```sh
