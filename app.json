@@ -2,7 +2,7 @@
   "expo": {
     "name": "Vaultify",
     "slug": "react-native-assets-app",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/vaultify-icon.jpg",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-notifications"
     ],
     "ios": {
       "supportsTablet": true,

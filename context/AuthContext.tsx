@@ -3,6 +3,7 @@ import { auth, database } from '../firebaseConfig';
 import { onValue, ref } from 'firebase/database';
 import { claimUsername, syncIdentity } from '../services/identity';
 import { UserProfile } from '../types';
+import { unregisterPush } from '../services/push';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -92,10 +93,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, pass: string) => {
+    if (auth.currentUser) await unregisterPush(auth.currentUser);
     await signInWithEmailAndPassword(auth, email.trim(), pass);
   };
 
   const signUp = async (email: string, pass: string, name: string) => {
+    if (auth.currentUser) await unregisterPush(auth.currentUser);
     const res = await createUserWithEmailAndPassword(auth, email.trim(), pass);
     await updateProfile(res.user, { displayName: name.trim() });
     await syncIdentity(res.user).catch(() => {
@@ -109,6 +112,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
+    if (auth.currentUser) await unregisterPush(auth.currentUser);
     await firebaseSignOut(auth);
   };
 

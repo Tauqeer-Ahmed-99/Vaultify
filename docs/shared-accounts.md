@@ -20,7 +20,7 @@ Create an account and choose **Group**. Its member screen opens after saving. Th
 
 The **Sharing** tab contains the invitation inbox and sharing profile. Members explicitly accept or reject invitations. A pending, rejected, cancelled, removed, or left membership never grants ledger access. Accepting adds the group account to the member’s home screen. Account and transaction changes update live.
 
-Users can claim a permanent, case-insensitive username of 3–24 ASCII letters, numbers, or underscores. Email discovery requires a verified Firebase Auth email. Existing users must open the updated app to create their sharing profile, and refresh that profile after verifying their email. The person being invited must already have a Vaultify login and a discoverable username or verified email. Invitations appear inside Vaultify; no invitation email or push notification is sent.
+Users can claim a permanent, case-insensitive username of 3–24 ASCII letters, numbers, or underscores. Email discovery requires a verified Firebase Auth email. Existing users must open the updated app to create their sharing profile, and refresh that profile after verifying their email. The person being invited must already have a Vaultify login and a discoverable username or verified email. Invitations appear inside Vaultify. Push delivery is implemented by the authenticated Vercel API described in [push-notifications.md](push-notifications.md); no invitation email is sent.
 
 Everyone with access can read the complete shared ledger and add transactions. Only a transaction’s creator can change or delete it, including when another member is the group creator. Ownership and creation metadata are immutable. The interface labels transactions with their creator. Removing a member or leaving immediately ends server access, while their existing transactions stay in the ledger. Rejoining requires a new invitation and acceptance; original transaction ownership is retained. Deleting a group account permanently deletes the complete ledger for everyone.
 
@@ -38,7 +38,7 @@ Linking immediately gives that person read-only access to this one ledger, inclu
 
 Editing the link requires fresh verification. Clear the contact field and save to return the ledger to private access. Linking, retargeting, and unlinking update the ledger and recipient discovery reference atomically; removing or changing the link revokes the old recipient’s access. Deleting a linked personal ledger also removes its recipient reference. Unlinked personal accounts continue to work without a contact or a data migration.
 
-Deploy the updated rules before using this feature. No database, Cloud Function, or dependency was added. Only lint and TypeScript checks were run for this change, as requested.
+Deploy the updated rules before using this feature. The notification implementation now routes creation, linking and invitation reissue through an isolated Vercel backend; see [push-notifications.md](push-notifications.md) for required configuration, older-client compatibility and rollout order. Firebase Authentication and RTDB remain in place; no Cloud Function or Firestore is used.
 
 | RTDB path | Purpose |
 | --- | --- |
@@ -54,7 +54,7 @@ Private accounts require no migration. Their old transactions without `ownerUid`
 
 RTDB rules enforce membership, consent transitions, immutable ownership, exact-query discovery, and payload validation. Do not replace them with authenticated-wide `.read` or `.write` permissions: rules granted by an ancestor override restrictions below it. Display names are user-provided labels; Firebase UIDs determine access. Membership records preserve the names used when the invitation was sent.
 
-Creating or responding to invitations and editing transactions use RTDB transactions to resolve concurrent changes. Username claims and profiles commit atomically, and the rules enforce uniqueness. Multi-delete operations and transaction creation also use atomic updates. Realtime listeners are detached on sign-out, access changes, and screen cleanup. The Firebase JS SDK keeps pending writes in memory; this feature does not promise durable offline writes across app restarts.
+Creating/reissuing invitations and other notification-producing mutations use authenticated Vercel endpoints with atomic RTDB mutations/idempotency and one-shot push attempts. Responding to invitations and editing transactions still use client RTDB transactions to resolve concurrent changes. Username claims and profiles commit atomically, and the rules enforce uniqueness. Multi-delete operations use atomic updates; new transactions and idempotency records commit atomically through the backend, followed by a one-shot push attempt. Realtime listeners are detached on sign-out, access changes, and screen cleanup. The Firebase JS SDK keeps pending writes in memory; this feature does not promise durable offline writes across app restarts.
 
 ## Local checks
 

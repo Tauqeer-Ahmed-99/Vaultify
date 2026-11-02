@@ -5,10 +5,87 @@
     "accounts": {
       "$uid": {
         ".read": "auth != null && auth.uid == $uid",
-        ".write": "auth != null && auth.uid == $uid",
         "$accountId": {
           ".read": "auth != null && data.child('linkedUserUid').val() == auth.uid",
-          ".validate": "((!newData.child('linkedUserUid').exists() && !newData.child('linkedUserName').exists() && !newData.child('linkedIdentifier').exists()) || (newData.hasChildren(['linkedUserUid', 'linkedUserName', 'linkedIdentifier']) && newData.child('linkedUserUid').isString() && newData.child('linkedUserUid').val() != $uid && newData.child('linkedUserName').isString() && newData.child('linkedUserName').val().length > 0 && newData.child('linkedUserName').val().length <= 100 && newData.child('linkedIdentifier').isString() && newData.child('linkedIdentifier').val().length <= 254 && root.child('profiles').child(newData.child('linkedUserUid').val()).child('emailVerified').val() == true && ((root.child('emailDirectory').child(newData.child('linkedUserUid').val()).child('email').val() == newData.child('linkedIdentifier').val()) || (newData.child('linkedIdentifier').val().matches(/^@[a-z0-9_]{3,24}$/) && root.child('usernames').child(newData.child('linkedIdentifier').val().replace('@', '')).val() == newData.child('linkedUserUid').val())) && newData.parent().parent().parent().child('personalLinks').child(newData.child('linkedUserUid').val()).child($uid + '_' + $accountId).child('ownerUid').val() == $uid && newData.parent().parent().parent().child('personalLinks').child(newData.child('linkedUserUid').val()).child($uid + '_' + $accountId).child('accountId').val() == $accountId)) && (!data.child('linkedUserUid').exists() || data.child('linkedUserUid').val() == newData.child('linkedUserUid').val() || !newData.parent().parent().parent().child('personalLinks').child(data.child('linkedUserUid').val()).child($uid + '_' + $accountId).exists())"
+          ".write": "auth != null && auth.uid == $uid && data.exists() && !newData.exists()",
+          ".validate": "newData.hasChildren(['accountName', 'accountDescripton', 'accountStartingDate'])",
+          "accountName": {
+            ".write": "auth != null && auth.uid == $uid && root.child('accounts').child($uid).child($accountId).exists()",
+            ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80"
+          },
+          "accountDescripton": {
+            ".write": "auth != null && auth.uid == $uid && root.child('accounts').child($uid).child($accountId).exists()",
+            ".validate": "newData.isString() && newData.val().length <= 500"
+          },
+          "accountStartingDate": {
+            ".write": "auth != null && auth.uid == $uid && root.child('accounts').child($uid).child($accountId).exists()",
+            ".validate": "newData.isString() && newData.val().length >= 10 && newData.val().length <= 40"
+          },
+          "colorIndex": {
+            ".write": "auth != null && auth.uid == $uid && root.child('accounts').child($uid).child($accountId).exists()",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 7"
+          },
+          "updatedAt": {
+            ".write": "auth != null && auth.uid == $uid && root.child('accounts').child($uid).child($accountId).exists()",
+            ".validate": "newData.isString() && newData.val().length >= 10 && newData.val().length <= 40"
+          },
+          "ownerUid": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "ownerName": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "createdAt": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "linkedUserUid": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "linkedUserName": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "linkedIdentifier": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "linkVersion": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "transactions": {
+            "$transactionId": {
+              ".write": "auth != null && auth.uid == $uid && root.child('accounts').child($uid).child($accountId).exists() && data.exists()",
+              ".validate": "newData.hasChildren(['amount', 'payment', 'date', 'reason']) && (!data.child('ownerUid').exists() || newData.child('ownerUid').val() == data.child('ownerUid').val()) && (!data.child('ownerName').exists() || newData.child('ownerName').val() == data.child('ownerName').val()) && (!data.child('createdAt').exists() || newData.child('createdAt').val() == data.child('createdAt').val())",
+              "ownerUid": {
+                ".validate": "newData.val() == data.val() && newData.val() == $uid"
+              },
+              "ownerName": {
+                ".validate": "newData.isString() && newData.val().length <= 100 && (!data.exists() || newData.val() == data.val())"
+              },
+              "amount": {
+                ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= 1000000000000"
+              },
+              "payment": {
+                ".validate": "newData.val() == 'sent' || newData.val() == 'received'"
+              },
+              "date": {
+                ".validate": "newData.isString() && newData.val().length >= 10 && newData.val().length <= 40"
+              },
+              "reason": {
+                ".validate": "newData.isString() && newData.val().length >= 0 && newData.val().length <= 500"
+              },
+              "createdAt": {
+                ".validate": "newData.isString() && newData.val().length <= 40 && (!data.exists() || newData.val() == data.val())"
+              },
+              "updatedAt": {
+                ".validate": "newData.isString() && newData.val().length >= 10 && newData.val().length <= 40"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       }
     },
@@ -62,7 +139,7 @@
       ".read": "auth != null && query.orderByChild == 'ownerUid' && query.equalTo == auth.uid",
       "$accountId": {
         ".read": "auth != null && root.child('groupAccounts').child($accountId).exists() && (root.child('groupAccounts').child($accountId).child('ownerUid').val() == auth.uid || (root.child('memberships').child($accountId + '_' + auth.uid).child('status').val() == 'accepted' && root.child('memberships').child($accountId + '_' + auth.uid).child('invitedBy').val() == root.child('groupAccounts').child($accountId).child('ownerUid').val()))",
-        ".write": "auth != null && ((!data.exists() && newData.child('ownerUid').val() == auth.uid) || (!newData.exists() && data.child('ownerUid').val() == auth.uid))",
+        ".write": "auth != null && data.exists() && !newData.exists() && data.child('ownerUid').val() == auth.uid",
         ".validate": "newData.hasChildren(['ownerUid', 'ownerName', 'accountName', 'accountDescripton', 'accountStartingDate', 'createdAt', 'updatedAt', 'colorIndex'])",
         "accountName": {
           ".write": "auth != null && (root.child('groupAccounts').child($accountId).child('ownerUid').val() == auth.uid)",
@@ -99,7 +176,7 @@
         },
         "transactions": {
           "$transactionId": {
-            ".write": "auth != null && root.child('groupAccounts').child($accountId).exists() && (root.child('groupAccounts').child($accountId).child('ownerUid').val() == auth.uid || (root.child('memberships').child($accountId + '_' + auth.uid).child('status').val() == 'accepted' && root.child('memberships').child($accountId + '_' + auth.uid).child('invitedBy').val() == root.child('groupAccounts').child($accountId).child('ownerUid').val())) && ((!data.exists() && newData.child('ownerUid').val() == auth.uid) || data.child('ownerUid').val() == auth.uid)",
+            ".write": "auth != null && root.child('groupAccounts').child($accountId).exists() && (root.child('groupAccounts').child($accountId).child('ownerUid').val() == auth.uid || (root.child('memberships').child($accountId + '_' + auth.uid).child('status').val() == 'accepted' && root.child('memberships').child($accountId + '_' + auth.uid).child('invitedBy').val() == root.child('groupAccounts').child($accountId).child('ownerUid').val())) && data.exists() && data.child('ownerUid').val() == auth.uid",
             ".validate": "newData.hasChildren(['ownerUid', 'ownerName', 'amount', 'payment', 'date', 'reason', 'createdAt', 'updatedAt'])",
             "ownerUid": {
               ".validate": "newData.val() == auth.uid && (!data.exists() || newData.val() == data.val())"
@@ -143,7 +220,7 @@
       ".read": "auth != null && ((query.orderByChild == 'recipientUid' && query.equalTo == auth.uid) || (query.orderByChild == 'accountId' && query.equalTo != null && (root.child('groupAccounts').child(query.equalTo).child('ownerUid').val() == auth.uid || (root.child('memberships').child(query.equalTo + '_' + auth.uid).child('status').val() == 'accepted' && root.child('memberships').child(query.equalTo + '_' + auth.uid).child('invitedBy').val() == root.child('groupAccounts').child(query.equalTo).child('ownerUid').val()))))",
       "$membershipId": {
         ".read": "auth != null && (!data.exists() || data.child('recipientUid').val() == auth.uid || (root.child('groupAccounts').child(data.child('accountId').val()).child('ownerUid').val() == auth.uid) || root.child('memberships').child(data.child('accountId').val() + '_' + auth.uid).child('status').val() == 'accepted')",
-        ".write": "auth != null && ((!newData.exists() && ((root.child('groupAccounts').child(data.child('accountId').val()).child('ownerUid').val() == auth.uid) || (data.child('recipientUid').val() == auth.uid && !root.child('groupAccounts').child(data.child('accountId').val()).exists()))) || (newData.exists() && (((root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() == auth.uid) && ((newData.child('status').val() == 'pending' && (!data.exists() || (data.child('status').val() != 'pending' && data.child('status').val() != 'accepted'))) || (data.exists() && ((data.child('status').val() == 'pending' && newData.child('status').val() == 'cancelled') || (data.child('status').val() == 'accepted' && newData.child('status').val() == 'removed'))))) || ((data.child('recipientUid').val() == auth.uid) && ((data.child('status').val() == 'pending' && newData.child('status').val() == 'rejected') || (root.child('groupAccounts').child(data.child('accountId').val()).exists() && ((data.child('status').val() == 'pending' && newData.child('status').val() == 'accepted') || (data.child('status').val() == 'accepted' && newData.child('status').val() == 'left'))))))))",
+        ".write": "auth != null && ((!newData.exists() && ((root.child('groupAccounts').child(data.child('accountId').val()).child('ownerUid').val() == auth.uid) || (data.child('recipientUid').val() == auth.uid && !root.child('groupAccounts').child(data.child('accountId').val()).exists()))) || (newData.exists() && (((root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() == auth.uid) && (false || (data.exists() && ((data.child('status').val() == 'pending' && newData.child('status').val() == 'cancelled') || (data.child('status').val() == 'accepted' && newData.child('status').val() == 'removed'))))) || ((data.child('recipientUid').val() == auth.uid) && ((data.child('status').val() == 'pending' && newData.child('status').val() == 'rejected') || (root.child('groupAccounts').child(data.child('accountId').val()).exists() && ((data.child('status').val() == 'pending' && newData.child('status').val() == 'accepted') || (data.child('status').val() == 'accepted' && newData.child('status').val() == 'left'))))))))",
         ".validate": "newData.hasChildren(['accountId', 'accountName', 'recipientUid', 'recipientName', 'invitedBy', 'inviterName', 'status', 'createdAt', 'updatedAt']) && $membershipId == newData.child('accountId').val() + '_' + newData.child('recipientUid').val() && (newData.child('invitedBy').val() == root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() || (data.exists() && data.child('invitedBy').val() == newData.child('invitedBy').val() && newData.child('status').val() == 'rejected')) && newData.child('recipientUid').val() != newData.child('invitedBy').val() && root.child('profiles').child(newData.child('recipientUid').val()).exists()",
         "accountId": {
           ".validate": "newData.isString() && newData.val().length <= 128 && (!data.exists() || newData.val() == data.val())"
@@ -155,16 +232,16 @@
           ".validate": "newData.isString() && newData.val().length <= 128 && (!data.exists() || newData.val() == data.val())"
         },
         "accountName": {
-          ".validate": "newData.isString() && newData.val().length <= 100 && (!data.exists() || newData.val() == data.val() || ((root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() == auth.uid) && newData.child('status').val() == 'pending'))"
+          ".validate": "newData.isString() && newData.val() == data.val()"
         },
         "recipientName": {
-          ".validate": "newData.isString() && newData.val().length <= 100 && (!data.exists() || newData.val() == data.val() || ((root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() == auth.uid) && newData.child('status').val() == 'pending'))"
+          ".validate": "newData.isString() && newData.val() == data.val()"
         },
         "inviterName": {
-          ".validate": "newData.isString() && newData.val().length <= 100 && (!data.exists() || newData.val() == data.val() || ((root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() == auth.uid) && newData.child('status').val() == 'pending'))"
+          ".validate": "newData.isString() && newData.val() == data.val()"
         },
         "createdAt": {
-          ".validate": "newData.isString() && newData.val().length <= 100 && (!data.exists() || newData.val() == data.val() || ((root.child('groupAccounts').child(newData.child('accountId').val()).child('ownerUid').val() == auth.uid) && newData.child('status').val() == 'pending'))"
+          ".validate": "newData.isString() && newData.val() == data.val()"
         },
         "status": {
           ".validate": "newData.val() == 'pending' || newData.val() == 'accepted' || newData.val() == 'rejected' || newData.val() == 'cancelled' || newData.val() == 'removed' || newData.val() == 'left'"
@@ -181,7 +258,7 @@
       "$recipientUid": {
         ".read": "auth != null && auth.uid == $recipientUid",
         "$linkId": {
-          ".write": "auth != null && ((newData.exists() && newData.child('ownerUid').val() == auth.uid && newData.parent().parent().parent().child('accounts').child(auth.uid).child(newData.child('accountId').val()).child('linkedUserUid').val() == $recipientUid) || (!newData.exists() && data.child('ownerUid').val() == auth.uid && newData.parent().parent().parent().child('accounts').child(auth.uid).child(data.child('accountId').val()).child('linkedUserUid').val() != $recipientUid))",
+          ".write": "auth != null && !newData.exists() && data.child('ownerUid').val() == auth.uid && newData.parent().parent().parent().child('accounts').child(auth.uid).child(data.child('accountId').val()).child('linkedUserUid').val() != $recipientUid",
           ".validate": "newData.hasChildren(['ownerUid', 'accountId']) && newData.child('ownerUid').isString() && newData.child('accountId').isString() && $linkId == newData.child('ownerUid').val() + '_' + newData.child('accountId').val() && (!data.exists() || (newData.child('ownerUid').val() == data.child('ownerUid').val() && newData.child('accountId').val() == data.child('accountId').val()))",
           "ownerUid": {
             ".validate": "newData.isString() && newData.val() == auth.uid"
@@ -194,6 +271,43 @@
           }
         }
       }
+    },
+    "pushOutbox": {
+      ".read": false,
+      ".write": false
+    },
+    "pushOperations": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "expiresAt"
+      ]
+    },
+    "pushRateLimits": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "until"
+      ]
+    },
+    "pushInstallations": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "expiresAt"
+      ]
+    },
+    "pushDevices": {
+      ".read": false,
+      ".write": false
+    },
+    "pushTokenOwners": {
+      ".read": false,
+      ".write": false
+    },
+    "pushPreferences": {
+      ".read": false,
+      ".write": false
     }
   }
 }

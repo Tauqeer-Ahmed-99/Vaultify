@@ -6,6 +6,7 @@ import { AccountsProvider } from '../../context/AccountsContext';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider, colors as c } from '../../theme/AppTheme';
+import { NotificationsProvider } from '../../context/NotificationsContext';
 import { accountsRoute } from '../../navigation/routes';
 
 function InitialLayout() {
@@ -42,8 +43,10 @@ export default function RootLayout() {
       <AppThemeProvider>
         <AuthProvider>
           <AccountsProvider>
-            <StatusBar style="light" />
-            <InitialLayout />
+            <NotificationsProvider>
+              <StatusBar style="light" />
+              <InitialLayout />
+            </NotificationsProvider>
           </AccountsProvider>
         </AuthProvider>
       </AppThemeProvider>

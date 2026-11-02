@@ -1,0 +1,9 @@
+.env*
+.vercel/
+.next/
+node_modules/
+*.tsbuildinfo
+*service-account*.json
+*adminsdk*.json
+*.pem
+*.key

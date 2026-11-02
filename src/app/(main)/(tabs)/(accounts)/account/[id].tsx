@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, Text, useWindowDimensions, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../../../context/AuthContext';
@@ -13,7 +13,9 @@ import { formatCurrency, formatDate, personalCounterparty, transactionDirection 
 import { accountsRoute } from '../../../../../../navigation/routes';
 
 export default function AccountDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, transactionId, notificationUnavailable, transactionUnavailable } = useLocalSearchParams<{ id: string; transactionId?: string; notificationUnavailable?: string; transactionUnavailable?: string }>();
+  const list = useRef<FlatList<Transaction>>(null);
+  const scrolledTo = useRef<string | null>(null);
   const { user } = useAuth();
   const { accounts, isLoading, error, fetchAccounts, getAccountBalance, canEditTransaction, deleteTransactions, setAccountIncludedInTotalAssets } = useAccounts();
   const { width, fontScale } = useWindowDimensions();
@@ -29,13 +31,25 @@ export default function AccountDetail() {
   const [savingSummary, setSavingSummary] = useState(false);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return (account?.transactions || []).filter(txn => !query || `${txn.reason} ${txn.ownerName || ''}`.toLowerCase().includes(query))
+    return (account?.transactions || []).filter(txn => txn.id === transactionId || !query || `${txn.reason} ${txn.ownerName || ''}`.toLowerCase().includes(query))
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [account, search]);
+  }, [account, search, transactionId]);
 
-  if (!account) return <Screen><View style={ui.content}>
+  useEffect(() => {
+    if (!transactionId || !account || scrolledTo.current === `${id}:${transactionId}`) return;
+    const index = filtered.findIndex(item => item.id === transactionId);
+    if (index >= 0) {
+      const task = requestAnimationFrame(() => {
+        list.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
+        scrolledTo.current = `${id}:${transactionId}`;
+      });
+      return () => cancelAnimationFrame(task);
+    }
+  }, [id, transactionId, account, filtered]);
+
+  if (!account || notificationUnavailable === 'ledger') return <Screen><View style={ui.content}>
     {isLoading ? <ActivityIndicator color={c.accent} accessibilityLabel="Loading ledger" /> : <EmptyState title="Account Unavailable"
-      message={error || 'This account was deleted or your access changed.'} action={<Button label="Back to Accounts" onPress={() => router.replace(accountsRoute)} />} />}
+      message={error || 'This account was deleted, your access changed, or the connection could not be verified.'} action={<Button label="Back to Accounts" onPress={() => router.replace(accountsRoute)} />} />}
   </View></Screen>;
 
   const owner = account.ownerUid === user?.uid;
@@ -70,10 +84,12 @@ export default function AccountDetail() {
     <Stack.Screen options={{ title: account.accountName,
       headerRight: account.kind === 'group' ? () => <Button label="Members" variant="plain" onPress={() => router.push(`/account/${id}/members`)} /> : undefined,
     }} />
-    <FlatList data={filtered} keyExtractor={txn => txn.id} contentContainerStyle={ui.content}
+    <FlatList ref={list} data={filtered}
+      onScrollToIndexFailed={({ averageItemLength, index }) => { list.current?.scrollToOffset({ offset: averageItemLength * index, animated: true }); }} keyExtractor={txn => txn.id} contentContainerStyle={ui.content}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       ListHeaderComponent={<View style={{ gap: 18 }}>
         <Notice message={failure || error} error />
+        {!!transactionId && (transactionUnavailable === 'true' || !account.transactions.some(item => item.id === transactionId)) && <EmptyState title="Transaction Unavailable" message="This transaction was deleted or your access changed." />}
         {error && <Button label="Retry" variant="secondary" onPress={() => { void fetchAccounts(); }} />}
         {!!counterparty && <Text style={ui.caption}>{account.isLinkedViewer ? `Read-only · Recorded by ${counterparty}` : `Linked to ${counterparty}`}</Text>}
         <BalanceCard value={getAccountBalance(account)} label="Current Balance" detail={`${account.transactions.length} transaction${account.transactions.length === 1 ? '' : 's'}`} />
@@ -103,7 +119,7 @@ export default function AccountDetail() {
           accessibilityHint={editable ? selecting ? 'Select transaction' : 'Edit transaction' : account.isLinkedViewer ? 'Only the ledger creator can edit' : 'Only the transaction owner can edit'}
           onPress={() => selecting ? toggle(item) : setEditor({ transaction: item, direction: item.payment })}
           onLongPress={editable ? () => { setSelecting(true); toggle(item); } : undefined}
-          style={({ pressed }) => [s.transaction, checked && { borderColor: c.accent, backgroundColor: c.accentSoft }, pressed && { opacity: 0.7 }]}>
+          style={({ pressed }) => [s.transaction, item.id === transactionId && { borderColor: c.accent, backgroundColor: c.accentSoft }, checked && { borderColor: c.accent, backgroundColor: c.accentSoft }, pressed && { opacity: 0.7 }]}>
           <View style={[s.transactionRow, stacked && { flexDirection: 'column' }]}>
             <View style={{ flex: 1, gap: 6 }}>
               <Text style={ui.heading}>{selecting && editable ? `${checked ? '✓ ' : '○ '}` : ''}{item.reason || 'Payment'}</Text>

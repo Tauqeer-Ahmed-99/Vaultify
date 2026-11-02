@@ -6,6 +6,7 @@ import { Membership } from '../../../../types';
 import { Button, EmptyState, Field, Screen, ui } from '../../../../components/ui';
 import { errorMessage, Notice } from '../../../../components/SharingUI';
 import { formatDate } from '../../../../utils/format';
+import { NotificationSettings } from '../../../../components/NotificationSettings';
 import { colors as c } from '../../../../theme/AppTheme';
 
 export default function Sharing() {
@@ -79,6 +80,7 @@ export default function Sharing() {
             </>}
           </View>
         </View>
+        <NotificationSettings />
         {!!history.length && <View style={ui.card}>
           <Button label={`${showHistory ? 'Hide' : 'Show'} History (${history.length})`} variant="plain" onPress={() => setShowHistory(previous => !previous)} />
           {showHistory && history.slice(0, 20).map(item => <View key={item.id} style={ui.divider}>

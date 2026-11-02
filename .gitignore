@@ -45,3 +45,8 @@ yarn-error.*
 /android
 
 google-services.json
+
+# Isolated notification server
+.next/
+.vercel/
+!notification-server/package-lock.json

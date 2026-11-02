@@ -1,5 +1,9 @@
 This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
+## Releases
+
+Read [docs/releases.md](docs/releases.md) before changing versions, building a release, or publishing with `gh`. Follow its version, tag, APK naming, and release metadata conventions. Keep release history there to linked version headings and UTC publication dates only; store full changelogs in the matching GitHub Releases.
+
 ## Expo has changed — do not trust your training data
 
 Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:

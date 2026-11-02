@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { equalTo, get, onValue, orderByChild, push, query, ref, runTransaction, set, update } from 'firebase/database';
+import { equalTo, get, onValue, orderByChild, query, ref, runTransaction, update } from 'firebase/database';
 import { database } from '../firebaseConfig';
 import { useAuth } from './AuthContext';
 import { Account, AccountInput, Membership, MembershipStatus, PersonalLedgerContact, PersonalLedgerReference, Transaction, TransactionInput } from '../types';
-import { findMember, findVerifiedLedgerContact } from '../services/identity';
+import { notificationMutation } from '../services/notificationApi';
 
 interface AccountsContextType {
   accounts: Account[];
@@ -83,7 +83,7 @@ function validateTransaction(txn: TransactionInput): TransactionInput {
 }
 
 function AccountsSession({ children }: { children: React.ReactNode }) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const uid = user?.uid;
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [memberships, setMemberships] = useState<Membership[]>([]);
@@ -194,53 +194,28 @@ function AccountsSession({ children }: { children: React.ReactNode }) {
     return account;
   };
   const accountPath = (account: Account) => account.kind === 'group' ? `groupAccounts/${account.id}` : `accounts/${account.ownerUid}/${account.sourceAccountId || account.id}`;
-  const displayName = (profile?.username ? `@${profile.username}` : user?.displayName || 'Vaultify member').slice(0, 100);
   const canEditTransaction = (account: Account, txn: Transaction) => !!uid && (account.kind === 'personal' ? account.ownerUid === uid : txn.ownerUid === uid);
 
-  const resolveContact = async (contact: PersonalLedgerContact) => {
-    const verified = await findVerifiedLedgerContact(contact.identifier);
-    if (verified.uid !== contact.uid) throw new Error('This contact changed. Verify the email or username again.');
-    return verified;
-  };
   const linkPath = (recipientUid: string, ownerUid: string, accountId: string) => `personalLinks/${recipientUid}/${ownerUid}_${accountId}`;
 
   const addAccount = async (input: AccountInput, kind: Account['kind'] = 'personal', contact?: PersonalLedgerContact | null) => {
-    const current = requireUser();
-    const data = validateAccount(input);
-    const now = new Date().toISOString();
-    const target = push(ref(database, kind === 'group' ? 'groupAccounts' : `accounts/${current.uid}`));
-    const verified = kind === 'personal' && contact ? await resolveContact(contact) : null;
-    const accountData = { ...data, ...(kind === 'group' ? { includeInTotalAssets: true } : {}),
-      ...(verified ? { linkedUserUid: verified.uid, linkedUserName: verified.name, linkedIdentifier: verified.identifier } : {}),
-      ownerUid: current.uid, ownerName: displayName, createdAt: now, updatedAt: now, colorIndex: accounts.length % 8 };
-    if (verified) {
-      await update(ref(database), {
-        [`accounts/${current.uid}/${target.key}`]: accountData,
-        [linkPath(verified.uid, current.uid, target.key!)]: { ownerUid: current.uid, accountId: target.key },
-      });
-    } else await set(target, accountData);
-    return target.key!;
+    requireUser();
+    const result = await notificationMutation({ action: 'createLedger', kind, data: validateAccount(input),
+      contact: kind === 'personal' && contact ? { uid: contact.uid, identifier: contact.identifier } : null,
+      colorIndex: accounts.length % 8 });
+    return result.accountId;
   };
   const editAccount = async (id: string, input: AccountInput, contact?: PersonalLedgerContact | null) => {
     const account = requireAccount(id, true);
-    const data = { ...validateAccount(input), updatedAt: new Date().toISOString() };
-    if (account.kind === 'group' || contact === undefined) {
-      await update(ref(database, accountPath(account)), data);
+    if (account.kind === 'group') {
+      await update(ref(database, accountPath(account)), { ...validateAccount(input), updatedAt: new Date().toISOString() });
       return;
     }
-    const verified = contact ? await resolveContact(contact) : null;
-    const changes: Record<string, unknown> = {};
-    const path = accountPath(account);
-    for (const [key, value] of Object.entries(data)) changes[`${path}/${key}`] = value;
-    changes[`${path}/linkedUserUid`] = verified?.uid || null;
-    changes[`${path}/linkedUserName`] = verified?.name || null;
-    changes[`${path}/linkedIdentifier`] = verified?.identifier || null;
-    changes[`${path}/ownerName`] = displayName;
-    if (account.linkedUserUid && account.linkedUserUid !== verified?.uid) {
-      changes[linkPath(account.linkedUserUid, account.ownerUid, account.sourceAccountId || id)] = null;
-    }
-    if (verified) changes[linkPath(verified.uid, account.ownerUid, account.sourceAccountId || id)] = { ownerUid: account.ownerUid, accountId: account.sourceAccountId || id };
-    await update(ref(database), changes);
+    const target = contact === undefined && account.linkedUserUid ? {
+      uid: account.linkedUserUid, identifier: account.linkedIdentifier,
+    } : contact ? { uid: contact.uid, identifier: contact.identifier } : null;
+    await notificationMutation({ action: 'editPersonalLedger', kind: 'personal', accountId: account.sourceAccountId || id,
+      ownerUid: account.ownerUid, data: validateAccount(input), contact: target });
   };
   const setAccountIncludedInTotalAssets = async (id: string, included: boolean) => {
     const account = requireAccount(id, true);
@@ -268,12 +243,8 @@ function AccountsSession({ children }: { children: React.ReactNode }) {
     requireUser();
     const account = requireAccount(id);
     if (account.kind === 'personal' && account.ownerUid !== uid) throw new Error('Only the creator can add transactions to this personal ledger.');
-    const now = new Date().toISOString();
-    const txnId = push(ref(database, `${accountPath(account)}/transactions`)).key!;
-    await update(ref(database, accountPath(account)), {
-      [`transactions/${txnId}`]: { ...validateTransaction(input), ownerUid: uid, ownerName: displayName, createdAt: now, updatedAt: now },
-      updatedAt: now,
-    });
+    await notificationMutation({ action: 'createTransaction', kind: account.kind, ownerUid: account.ownerUid,
+      accountId: account.sourceAccountId || id, data: validateTransaction(input) });
   };
   const requireOwnedTransactions = (account: Account, ids: string[]) => {
     for (const id of ids) {
@@ -306,14 +277,7 @@ function AccountsSession({ children }: { children: React.ReactNode }) {
   const inviteMember = async (id: string, identifier: string) => {
     const account = requireAccount(id, true);
     if (account.kind !== 'group') throw new Error('Invitations are available for group accounts.');
-    const member = await findMember(identifier);
-    if (member.uid === uid) throw new Error('You already own this account.');
-    const now = new Date().toISOString();
-    const result = await runTransaction(ref(database, `memberships/${id}_${member.uid}`), current => {
-      if (current?.status === 'pending' || current?.status === 'accepted') return;
-      return { accountId: id, accountName: account.accountName, recipientUid: member.uid, recipientName: member.name, invitedBy: uid, inviterName: displayName, status: 'pending', createdAt: now, updatedAt: now };
-    }, { applyLocally: false });
-    if (!result.committed) throw new Error('This person is already a member or has a pending invitation.');
+    await notificationMutation({ action: 'invite', kind: 'group', accountId: id, identifier: identifier.trim().toLowerCase() });
   };
   const changeMembership = async (membership: Membership, status: MembershipStatus) => {
     requireUser();
