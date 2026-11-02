@@ -1,6 +1,6 @@
 {
   "name": "react-native-assets-app",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -15,6 +15,7 @@
     "expo-router": "~57.0.29",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
+    "expo-updates": "~57.0.26",
     "firebase": "^12.0.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -34,7 +35,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "update:preview": "npx eas-cli@latest update --channel preview --environment preview",
+    "update:production": "npx eas-cli@latest update --channel production --environment production"
   },
   "private": true,
   "allowScripts": {

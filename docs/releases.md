@@ -4,6 +4,8 @@ Current deployed version: **2.0.1**. Update this after publishing a new stable r
 
 ## Release instructions
 
+For JavaScript and asset updates after installing an OTA-enabled native build, follow [OTA updates](ota-updates.md). Native changes and the first OTA-enabled APK still require the release process below.
+
 1. Choose `MAJOR.MINOR.PATCH`: patch for fixes, minor for backward-compatible features, major for breaking changes; reset lower components on minor/major bumps. Bump for a release, not each commit. Keep `app.json` → `expo.version`, `package.json` → `version`, and the root version fields in `package-lock.json` identical. Use `npm version <version> --no-git-tag-version` for the package and lockfile, then update `app.json`.
 2. Tags are exactly `MAJOR.MINOR.PATCH` (for example, `1.0.1`, without a `v` prefix), continuing the existing `1.0.0` convention. Never move or reuse a published tag. Use a new version for a replacement release.
 3. EAS uses remote build versions (`cli.appVersionSource: "remote"`); production currently has no `autoIncrement`. Before **every** Android build, run `npx eas-cli@latest build:version:get --platform android --profile production`, then `npx eas-cli@latest build:version:set --platform android --profile production` and set an integer `versionCode` greater than all previously used codes. Editing local `android.versionCode` does not update the remote value. For iOS releases, also advance the remote `buildNumber` using the same commands with `--platform ios`.
